@@ -1,0 +1,41 @@
+# data source
+ticker: ^GSPC
+start: "2000-01-01"
+
+# train / test split
+train_ratio: 0.80
+
+# windowing
+lookback: 200          # past OHLCV bars
+forward: 5             # bars used for reward look-ahead
+
+# reward engine
+reward_key: "car"      # car | sharpe | sortino | calmar
+fee_bps: 0.2           # 0.2 = 0.02 %
+slippage_bps: 0.1
+spread_bps: 0.05
+overnight_bp: 2.0      # 2 bp per night
+
+# curriculum
+curriculum_phases: 3   # 0,1,2
+phase0_vol_pct: 40     # % of data closest to median volatility
+phase0_skew_max: 0.5
+
+# scaling
+scale_meta: "minmax"   # minmax | std
+scale_y: False         # keep raw currency units
+
+# disk
+parquet_compression: "gzip"  # gzip | snappy
+chunk_rows: 12_000_000       # rows held in RAM per incremental fit
+
+# modelling
+model_type: "transformer"    # transformer | lightgbm
+batch_size: 1024
+epochs: 2                    # will usually early-stop earlier
+lr: 1e-3
+d_model: 128
+nhead: 4
+tx_blocks: 4
+mlp_ratio: 4
+dropout: 0.1
