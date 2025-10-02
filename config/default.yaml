@@ -1,13 +1,16 @@
 # data source
 ticker: ^GSPC
-start: "2000-01-01"
+start: "1930-01-01"  # yfinance supports S&P 500 data back to 1927
+
+# dataset generation
+n_samples: 100     # total number of samples to generate
 
 # train / test split
 train_ratio: 0.80
 
 # windowing
 lookback: 200          # past OHLCV bars
-forward: 5             # bars used for reward look-ahead
+forward: 200           # bars used for reward look-ahead
 
 # reward engine
 reward_key: "car"      # car | sharpe | sortino | calmar
@@ -29,13 +32,80 @@ scale_y: False         # keep raw currency units
 parquet_compression: "gzip"  # gzip | snappy
 chunk_rows: 12_000_000       # rows held in RAM per incremental fit
 
+# data paths
+data_dir: "data"                              # base directory for all data files
+raw_data_filename: "raw_{ticker}.parquet"     # raw OHLCV data file (ticker will be substituted)
+scaler_filename: "meta_scaler.json"           # fitted scaler parameters
+samples_filename: "samples_{n}M{suffix}.parquet"  # generated samples (n in millions, suffix for variants)
+
+# optimal action computation
+compute_optimal: false       # whether to compute optimal actions
+optimal_method: "sample"     # sample | optimize
+optimal_samples: 1000        # samples per direction for 'sample' method
+optimal_maxiter: 100         # max iterations for 'optimize' method
+
 # modelling
-model_type: "transformer"    # transformer | lightgbm
+# Available model types: transformer | lightgbm | informer | fedformer | patchtst | itransformer | nbeats | nhits
+model_type: "transformer"
 batch_size: 1024
 epochs: 2                    # will usually early-stop earlier
 lr: 1e-3
+
+# Common neural network hyperparameters (used by most models)
 d_model: 128
 nhead: 4
-tx_blocks: 4
+tx_blocks: 4                 # number of transformer blocks (used by transformer-based models)
 mlp_ratio: 4
 dropout: 0.1
+
+# PatchTST specific parameters
+patch_len: 16                # length of each patch
+patch_stride: 8              # stride between patches
+
+# N-BEATS specific parameters
+nbeats_stack_types: ["trend", "seasonality", "generic"]  # stack types
+nbeats_n_blocks: [1, 1, 1]   # number of blocks per stack
+nbeats_mlp_units: 512        # MLP units per block
+nbeats_shares_weights: false
+
+# NHITS specific parameters
+nhits_pools: [1, 2, 4]       # multi-rate pooling sizes
+nhits_mlp_units: 512
+
+# LightGBM specific parameters
+lgb_linear_tree: true        # use linear tree (hybrid model)
+lgb_max_depth: 8
+lgb_num_leaves: 256
+lgb_subsample: 0.8
+lgb_linear_lambda: 0.01
+
+# synthetic data generation
+synth_equity_min: 10000      # minimum equity for synthetic trade states
+synth_equity_max: 100000     # maximum equity for synthetic trade states
+synth_balance_offset_min: -5000   # min balance offset from equity
+synth_balance_offset_max: 5000    # max balance offset from equity
+synth_position_values: [0.0, 1.0, -1.0]  # possible position values (flat, long, short)
+synth_sl_min: 0.001          # minimum stop-loss distance
+synth_sl_max: 0.05           # maximum stop-loss distance
+synth_tp_min: 0.001          # minimum take-profit distance
+synth_tp_max: 0.10           # maximum take-profit distance
+synth_dollar_min: 1000       # minimum action dollar amount
+synth_dollar_max: 50000      # maximum action dollar amount
+
+# action search ranges
+action_dollar_min: 1000      # minimum dollar for action search
+action_dollar_max: 50000     # maximum dollar for action search
+action_sl_min: 0.001         # minimum stop-loss for action search
+action_sl_max: 0.05          # maximum stop-loss for action search
+action_tp_min: 0.001         # minimum take-profit for action search
+action_tp_max: 0.10          # maximum take-profit for action search
+action_search_samples: 1000  # number of samples for action search
+
+# numerical stability
+epsilon: 1.0e-8              # small value to prevent division by zero
+
+# trading calendar
+trading_days_per_year: 252   # number of trading days per year for annualization
+
+# curriculum learning
+curriculum_vol_window: 20    # window size for volatility calculation in curriculum

@@ -53,16 +53,11 @@ class TransformerModel(TwoInputModel):
         
         # CNN encoder: 200 -> 50 tokens
         # PyTorch Conv1d expects (B, C, L) format
-        self.cnn1 = nn.Conv1d(self.n_features, 64, kernel_size=8, stride=2, padding=3)
-        self.cnn2 = nn.Conv1d(64, d_model, kernel_size=4, stride=2, padding=1)
-        
-        # Calculate actual output length after convolutions
-        # After cnn1: (200 + 2*3 - 8) // 2 + 1 = 100
-        # After cnn2: (100 + 2*1 - 4) // 2 + 1 = 50
-        self.seq_len_out = 50
+        self.cnn1 = nn.Conv1d(self.n_features, 64, kernel_size=8, stride=2, padding=4)
+        self.cnn2 = nn.Conv1d(64, d_model, kernel_size=4, stride=2, padding=2)
         
         # Positional encoding (learnable)
-        self.pos_encoding = nn.Parameter(torch.randn(1, self.seq_len_out, 1) * 0.02)
+        self.pos_encoding = nn.Parameter(torch.randn(1, 50, 1) * 0.02)
         
         # Transformer encoder blocks
         encoder_layer = nn.TransformerEncoderLayer(
@@ -225,26 +220,13 @@ class PatchTSTModel(TwoInputModel):
     def forward(self, price, meta):
         B, T, C = price.shape
         
-        # Extract patches: reshape to (B, T*C) then unfold
-        x = price.reshape(B, -1)  # (B, T*C)
-        
-        # Unfold to create patches
-        # unfold(dimension, size, step)
-        patches = x.unfold(1, self.patch_len, self.stride)  # (B, n_patches, patch_len)
-        
-        # Each patch should be patch_len timesteps, need to include all C features
-        # Reshape: (B, n_patches, patch_len) -> (B, n_patches, patch_len*C)
-        # Actually, we need to extract patches across the flattened T*C dimension
-        # Let's use a simpler approach: stride through time dimension only
-        n_patches = (T - self.patch_len) // self.stride + 1
-        patch_list = []
-        for i in range(n_patches):
-            start_idx = i * self.stride
-            end_idx = start_idx + self.patch_len
-            patch = price[:, start_idx:end_idx, :]  # (B, patch_len, C)
-            patch = patch.reshape(B, -1)  # (B, patch_len*C)
-            patch_list.append(patch)
-        patches = torch.stack(patch_list, dim=1)  # (B, n_patches, patch_len*C)
+        # Extract patches using unfold
+        # Flatten last two dims: (B, T, C) -> (B, T*C)
+        x = price.reshape(B, T * C)
+        # Unfold: (B, T*C) -> (B, patch_len*C, n_patches)
+        patches = x.unfold(1, self.patch_len * C, self.stride * C)
+        # (B, n_patches, patch_len*C)
+        patches = patches.transpose(1, 2)
         
         # Embed patches
         x = self.patch_embed(patches)  # (B, n_patches, d_model)

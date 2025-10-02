@@ -110,14 +110,12 @@ if model_type in neural_models:
     train_loader = DataLoader(train_dataset, batch_size=CFG["batch_size"], shuffle=True)
     
     # Setup optimizer and loss
-    lr = float(CFG["lr"]) if isinstance(CFG["lr"], str) else CFG["lr"]
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+    optimizer = optim.Adam(model.parameters(), lr=CFG["lr"])
     criterion = nn.MSELoss()
     
     # Training loop with progress tracking
     model.train()
     best_loss = float('inf')
-    model_path = f"models/{model_type}_model.pt"
     
     for epoch in range(CFG["epochs"]):
         epoch_loss = 0
@@ -138,24 +136,25 @@ if model_type in neural_models:
         
         avg_loss = epoch_loss / n_batches
         
-        # Validation every epoch
-        model.eval()
-        with torch.no_grad():
-            y_pred_val = model(X_price_test_t, X_meta_test_t)
-            val_loss = criterion(y_pred_val, y_test_t).item()
-        model.train()
-        
-        if (epoch + 1) % 5 == 0 or (epoch + 1) == CFG['epochs']:
+        # Validation
+        if (epoch + 1) % 5 == 0:
+            model.eval()
+            with torch.no_grad():
+                y_pred_val = model(X_price_test_t, X_meta_test_t)
+                val_loss = criterion(y_pred_val, y_test_t).item()
+            model.train()
+            
             print(f"Epoch {epoch+1}/{CFG['epochs']}, Train Loss: {avg_loss:.6f}, Val Loss: {val_loss:.6f}")
-        
-        # Save best model
-        if val_loss < best_loss:
-            best_loss = val_loss
-            torch.save({
-                'model_state_dict': model.state_dict(),
-                'config': CFG,
-                'model_type': model_type
-            }, model_path)
+            
+            # Save best model
+            if val_loss < best_loss:
+                best_loss = val_loss
+                model_path = f"models/{model_type}_model.pt"
+                torch.save({
+                    'model_state_dict': model.state_dict(),
+                    'config': CFG,
+                    'model_type': model_type
+                }, model_path)
     
     print(f"Saved best model to {model_path}")
     

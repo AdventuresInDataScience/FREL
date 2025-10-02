@@ -26,33 +26,35 @@ class Action:
     tp: float
 
 
-def _random_trade_state(rng: np.random.Generator) -> TradeState:
-    equity = rng.uniform(1e4, 1e5)
-    balance = equity - rng.uniform(-5e3, 5e3)
-    position = rng.choice([0.0, 1.0, -1.0])
-    sl_dist = rng.uniform(0.001, 0.05)
-    tp_dist = rng.uniform(0.001, 0.10)
+def _random_trade_state(rng: np.random.Generator, cfg: dict) -> TradeState:
+    equity = rng.uniform(cfg.get("synth_equity_min", 1e4), cfg.get("synth_equity_max", 1e5))
+    balance = equity - rng.uniform(cfg.get("synth_balance_offset_min", -5e3), cfg.get("synth_balance_offset_max", 5e3))
+    position = rng.choice(cfg.get("synth_position_values", [0.0, 1.0, -1.0]))
+    sl_dist = rng.uniform(cfg.get("synth_sl_min", 0.001), cfg.get("synth_sl_max", 0.05))
+    tp_dist = rng.uniform(cfg.get("synth_tp_min", 0.001), cfg.get("synth_tp_max", 0.10))
     return TradeState(equity, balance, position, sl_dist, tp_dist)
 
 
-def _random_action(rng: np.random.Generator) -> Action:
+def _random_action(rng: np.random.Generator, cfg: dict) -> Action:
     dir_ = rng.choice(["hold", "long", "short"])
     if dir_ == "hold":
         return Action("hold", 0.0, 0.0, 0.0)
-    dollar = rng.uniform(1e3, 5e4)
-    sl = rng.uniform(0.001, 0.05)
-    tp = rng.uniform(0.001, 0.10)
+    dollar = rng.uniform(cfg.get("synth_dollar_min", 1e3), cfg.get("synth_dollar_max", 5e4))
+    sl = rng.uniform(cfg.get("synth_sl_min", 0.001), cfg.get("synth_sl_max", 0.05))
+    tp = rng.uniform(cfg.get("synth_tp_min", 0.001), cfg.get("synth_tp_max", 0.10))
     return Action(dir_, dollar, sl, tp)
 
 
-def build_samples(df: pd.DataFrame, n: int, lookback: int, forward: int, rng: np.random.Generator) -> pd.DataFrame:
+def build_samples(df: pd.DataFrame, n: int, lookback: int, forward: int, rng: np.random.Generator, cfg: dict = None) -> pd.DataFrame:
     """Return DataFrame with one row per sample."""
+    if cfg is None:
+        cfg = {}
     rows: List[Dict[str, Any]] = []
     max_idx = len(df) - lookback - forward
     for _ in tqdm.trange(n, desc="build samples"):
         idx = rng.integers(lookback, max_idx)
-        ts = _random_trade_state(rng)
-        act = _random_action(rng)
+        ts = _random_trade_state(rng, cfg)
+        act = _random_action(rng, cfg)
         rows.append(
             dict(
                 idx=idx,

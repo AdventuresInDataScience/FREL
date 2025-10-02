@@ -37,14 +37,14 @@ class MetaScaler:
             else:  # std
                 self.stats[c] = dict(mean=float(x.mean()), std=float(x.std()))
 
-    def transform(self, df: pd.DataFrame, cols: list) -> pd.DataFrame:
+    def transform(self, df: pd.DataFrame, cols: list, epsilon: float = 1e-8) -> pd.DataFrame:
         df = df.copy()
         for c in cols:
             s = self.stats[c]
             if self.kind == "minmax":
-                df[c] = (df[c] - s["min"]) / (s["max"] - s["min"] + 1e-8)
+                df[c] = (df[c] - s["min"]) / (s["max"] - s["min"] + epsilon)
             else:
-                df[c] = (df[c] - s["mean"]) / (s["std"] + 1e-8)
+                df[c] = (df[c] - s["mean"]) / (s["std"] + epsilon)
         return df
 
     def inverse(self, col: str, vals: np.ndarray) -> np.ndarray:

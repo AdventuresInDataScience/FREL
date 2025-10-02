@@ -16,7 +16,7 @@ def test_download():
 
 def test_synth():
     df = data.download("^GSPC", "2020-01-01")
-    samples = synth.build_samples(df, 50, 200, 5, np.random.default_rng(0))
+    samples = synth.build_samples(df, 50, 200, 5, np.random.default_rng(0), {})
     assert len(samples) == 50
     assert "close" in samples.columns
 
