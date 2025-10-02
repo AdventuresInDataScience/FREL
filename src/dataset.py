@@ -1,10 +1,12 @@
 """
-High-level helper: build n samples, scale, attach y, save parquet, return paths.
+High-level helper: build n samples, scale, attach y, save parquet.
+
+Note: Optimal action computation is handled by the Predictor class during inference,
+not during dataset generation.
 """
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Optional
 from . import synth, reward, scale, curriculum
 
 
@@ -12,9 +14,7 @@ def build_dataset(
     cfg: dict, 
     n_samples: int, 
     seed: int = 42, 
-    overwrite: bool = False,
-    compute_optimal: bool = False,
-    optimal_method: str = "optimize"
+    overwrite: bool = False
 ) -> Path:
     """
     Main convenience wrapper. Returns Path to gzipped parquet file.
@@ -23,9 +23,7 @@ def build_dataset(
         cfg: Configuration dict
         n_samples: Number of samples to generate
         seed: Random seed
-        overwrite: Force rebuild if exists
-        compute_optimal: Whether to compute optimal actions
-        optimal_method: 'optimize' or 'sample' for optimal action computation
+        overwrite: Force rebuild raw data if exists
         
     Returns:
         Path to saved parquet file
@@ -77,29 +75,9 @@ def build_dataset(
                                        trading_days=cfg.get("trading_days_per_year", 252),
                                        epsilon=cfg.get("epsilon", 1e-8))
 
-    # ---------- optimal actions (optional) ----------
-    if compute_optimal:
-        print(f"Computing optimal actions using method={optimal_method}...")
-        opt_df = reward.compute_optimal_labels(
-            df_close["close"].values,
-            samples,
-            cfg["reward_key"],
-            cfg["fee_bps"],
-            cfg["slippage_bps"],
-            cfg["spread_bps"],
-            cfg["overnight_bp"],
-            method=optimal_method,
-            seed=seed,
-            trading_days=cfg.get("trading_days_per_year", 252),
-            epsilon=cfg.get("epsilon", 1e-8),
-            cfg=cfg
-        )
-        samples = pd.concat([samples, opt_df], axis=1)
-
     # ---------- save ----------
-    suffix = "_opt" if compute_optimal else ""
-    samples_filename = cfg.get("samples_filename", "samples_{n}M{suffix}.parquet")
-    samples_filename = samples_filename.format(n=n_samples // 1_000_000, suffix=suffix)
+    samples_filename = cfg.get("samples_filename", "samples_{n}M.parquet")
+    samples_filename = samples_filename.format(n=n_samples // 1_000_000)
     out_path = data_dir / samples_filename
     samples.to_parquet(out_path, compression=cfg["parquet_compression"], index=False)
     return out_path

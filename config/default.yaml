@@ -36,13 +36,7 @@ chunk_rows: 12_000_000       # rows held in RAM per incremental fit
 data_dir: "data"                              # base directory for all data files
 raw_data_filename: "raw_{ticker}.parquet"     # raw OHLCV data file (ticker will be substituted)
 scaler_filename: "meta_scaler.json"           # fitted scaler parameters
-samples_filename: "samples_{n}M{suffix}.parquet"  # generated samples (n in millions, suffix for variants)
-
-# optimal action computation
-compute_optimal: false       # whether to compute optimal actions
-optimal_method: "sample"     # sample | optimize
-optimal_samples: 1000        # samples per direction for 'sample' method
-optimal_maxiter: 100         # max iterations for 'optimize' method
+samples_filename: "samples_{n}M.parquet"      # generated samples (n in millions)
 
 # modelling
 # Available model types: transformer | lightgbm | informer | fedformer | patchtst | itransformer | nbeats | nhits
