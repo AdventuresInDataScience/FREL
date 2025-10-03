@@ -53,6 +53,29 @@ class MetaScaler:
             return vals * (s["max"] - s["min"]) + s["min"]
         else:
             return vals * s["std"] + s["mean"]
+    
+    def inverse_transform_dict(self, scaled_dict: Dict[str, float]) -> Dict[str, float]:
+        """
+        Inverse transform a dictionary of scaled values.
+        
+        Args:
+            scaled_dict: Dict mapping column names to scaled values
+            
+        Returns:
+            Dict with unscaled values
+        """
+        unscaled = {}
+        for col, val in scaled_dict.items():
+            if col in self.stats:
+                s = self.stats[col]
+                if self.kind == "minmax":
+                    unscaled[col] = val * (s["max"] - s["min"]) + s["min"]
+                else:
+                    unscaled[col] = val * s["std"] + s["mean"]
+            else:
+                # Column not in stats - pass through unchanged
+                unscaled[col] = val
+        return unscaled
 
     def save(self, path: Path):
         path.write_text(json.dumps(self.stats))

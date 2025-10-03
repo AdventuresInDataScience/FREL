@@ -29,14 +29,20 @@ scale_meta: "minmax"   # minmax | std
 scale_y: False         # keep raw currency units
 
 # disk
-parquet_compression: "gzip"  # gzip | snappy
-chunk_rows: 12_000_000       # rows held in RAM per incremental fit
+parquet_compression: "snappy"  # snappy (fastest, good compression) | zstd (slower, better compression) | gzip (slowest, best compression)
+compression_level: null        # compression level (null=default, zstd: 1-22, gzip: 1-9). Lower=faster
+chunk_rows: 5_000_000          # rows per chunk for saving/loading large datasets (prevents OOM)
+use_fp16: true                 # use float16 for scaled arrays (50% size reduction, sufficient precision)
 
 # data paths
 data_dir: "data"                              # base directory for all data files
 raw_data_filename: "raw_{ticker}.parquet"     # raw OHLCV data file (ticker will be substituted)
 scaler_filename: "meta_scaler.json"           # fitted scaler parameters
 samples_filename: "samples_{n}M.parquet"      # generated samples (n in millions)
+forward_windows_filename: "forward_windows.parquet"  # pre-computed forward windows (unique idx)
+
+# performance
+n_jobs: -1                                    # parallel workers for large datasets (-1=all cores, -2=all but one, 1=no parallelization)
 
 # modelling
 # Available model types: transformer | lightgbm | informer | fedformer | patchtst | itransformer | nbeats | nhits
@@ -73,26 +79,48 @@ lgb_num_leaves: 256
 lgb_subsample: 0.8
 lgb_linear_lambda: 0.01
 
-# synthetic data generation
-synth_equity_min: 10000      # minimum equity for synthetic trade states
-synth_equity_max: 100000     # maximum equity for synthetic trade states
-synth_balance_offset_min: -5000   # min balance offset from equity
-synth_balance_offset_max: 5000    # max balance offset from equity
-synth_position_values: [0.0, 1.0, -1.0]  # possible position values (flat, long, short)
-synth_sl_min: 0.001          # minimum stop-loss distance
-synth_sl_max: 0.05           # maximum stop-loss distance
-synth_tp_min: 0.001          # minimum take-profit distance
-synth_tp_max: 0.10           # maximum take-profit distance
-synth_dollar_min: 1000       # minimum action dollar amount
-synth_dollar_max: 50000      # maximum action dollar amount
+# Position structure and constraints
+max_leverage: 5.0            # maximum leverage allowed (gross_exposure / equity)
+min_equity: 1000             # minimum account equity
 
-# action search ranges
-action_dollar_min: 1000      # minimum dollar for action search
-action_dollar_max: 50000     # maximum dollar for action search
-action_sl_min: 0.001         # minimum stop-loss for action search
-action_sl_max: 0.05          # maximum stop-loss for action search
-action_tp_min: 0.001         # minimum take-profit for action search
-action_tp_max: 0.10          # maximum take-profit for action search
+# SL/TP constraints (using multiplier notation)
+# Long: sl < 1.0 (e.g., 0.95 = 5% stop), tp > 1.0 (e.g., 1.10 = 10% profit)
+# Short: sl > 1.0 (e.g., 1.05 = 5% stop), tp < 1.0 (e.g., 0.90 = 10% profit)
+sl_min: 0.50                 # minimum SL multiplier (max 50% loss)
+sl_max: 1.50                 # maximum SL multiplier
+tp_min: 1.001                # minimum TP multiplier (must exceed costs, adjusted in code)
+tp_max: 21.0                 # maximum TP multiplier (20x = 2000% gain)
+
+# Synthetic data generation - NEW STRUCTURE
+# Position state (current holdings)
+synth_equity_min: 10000              # minimum equity
+synth_equity_max: 100000             # maximum equity
+synth_long_value_min: 0              # minimum long position value
+synth_long_value_max: 50000          # maximum long position value
+synth_short_value_min: 0             # minimum short position value  
+synth_short_value_max: 50000         # maximum short position value
+
+# Position SL/TP ranges (using multiplier notation)
+synth_long_sl_min: 0.50              # long stop loss range
+synth_long_sl_max: 0.99              # (e.g., 0.95 = 5% stop)
+synth_long_tp_min: 1.01              # long take profit range
+synth_long_tp_max: 21.0              # (e.g., 1.10 = 10% profit)
+synth_short_sl_min: 1.01             # short stop loss range
+synth_short_sl_max: 1.50             # (e.g., 1.05 = 5% stop)
+synth_short_tp_min: 0.50             # short take profit range
+synth_short_tp_max: 0.99             # (e.g., 0.90 = 10% profit)
+
+# Distribution parameters for sampling
+position_value_mean: 10000           # mean for log-normal distribution
+position_value_sigma: 1.0            # sigma for log-normal distribution
+tp_sl_mean: 0.05                     # mean for truncated normal (after converting to fraction)
+tp_sl_sigma: 0.03                    # sigma for truncated normal
+
+# Hold sample generation
+hold_state_pct: 0.10                 # percentage of samples with no positions (flat)
+hold_action_pct: 0.20                # percentage of samples with no action (keep positions)
+
+# Action search ranges (for predictor optimization, not synth generation)
 action_search_samples: 1000  # number of samples for action search
 
 # numerical stability

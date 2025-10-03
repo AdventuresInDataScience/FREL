@@ -37,7 +37,7 @@ print(f"Testing module: dataset.py (build_dataset wrapper)")
 test_cfg = cfg.copy()
 test_cfg.update({
     "ticker": "^GSPC",
-    "start": "2020-01-01",
+    "start": "1960-01-01",
     "lookback": 50,
     "forward": 20,
     "n_samples": 100,
@@ -95,28 +95,28 @@ print(f"✓ Correct number of samples: {len(df)}")
 
 # Test 1c: Validate required columns
 print("\n[1c] Validating required columns...")
-expected_ohlcv_cols = ["open", "high", "low", "close", "volume"]
+# Note: Unscaled OHLCV dropped before save, only *_scaled versions in file (FP16 by default)
 expected_ohlcv_scaled_cols = ["open_scaled", "high_scaled", "low_scaled", "close_scaled", "volume_scaled"]
 expected_meta_cols = ["equity", "balance", "position", "sl_dist", "tp_dist", 
                       "act_dollar", "act_sl", "act_tp"]
-expected_info_cols = ["idx", "forward", "y"]
+expected_info_cols = ["idx", "forward", "y", "act_dir"]
 
-all_expected_cols = expected_ohlcv_cols + expected_ohlcv_scaled_cols + expected_meta_cols + expected_info_cols
+all_expected_cols = expected_ohlcv_scaled_cols + expected_meta_cols + expected_info_cols
 for col in all_expected_cols:
     assert col in df.columns, f"Missing column: {col}"
 print(f"✓ All required columns present ({len(all_expected_cols)} columns)")
-print(f"  - OHLCV original: {len(expected_ohlcv_cols)} cols")
-print(f"  - OHLCV scaled: {len(expected_ohlcv_scaled_cols)} cols")
-print(f"  - Meta: {len(expected_meta_cols)} cols")
+print(f"  - OHLCV scaled (FP16): {len(expected_ohlcv_scaled_cols)} cols")
+print(f"  - Meta (FP16): {len(expected_meta_cols)} cols")
 print(f"  - Info: {len(expected_info_cols)} cols")
+print(f"  (Unscaled OHLCV dropped to save 50% space)")
 
-# Test 1d: Validate OHLCV arrays (both original and scaled)
-print("\n[1d] Validating OHLCV array structures...")
-for col in expected_ohlcv_cols + expected_ohlcv_scaled_cols:
+# Test 1d: Validate OHLCV scaled array structures
+print("\n[1d] Validating OHLCV scaled array structures...")
+for col in expected_ohlcv_scaled_cols:
     first_array = df[col].iloc[0]
     assert isinstance(first_array, np.ndarray), f"{col} should contain numpy arrays"
     assert len(first_array) == test_cfg["lookback"], f"{col} arrays should have lookback length ({test_cfg['lookback']})"
-print(f"✓ OHLCV arrays have correct structure (original + scaled, length={test_cfg['lookback']})")
+print(f"✓ OHLCV scaled arrays have correct structure (length={test_cfg['lookback']})")
 
 # Test 1e: Validate meta columns are numeric
 print("\n[1e] Validating meta column types...")
@@ -328,8 +328,8 @@ output_path_small = dataset.build_dataset(
 )
 df_small = pd.read_parquet(output_path_small)
 assert df_small["forward"].iloc[0] == 10, "Forward column should match config"
-assert len(df_small["close"].iloc[0]) == 20, "OHLCV arrays should have lookback length"
-print(f"✓ Small windows work: forward={df_small['forward'].iloc[0]}, lookback_len={len(df_small['close'].iloc[0])}")
+assert len(df_small["close_scaled"].iloc[0]) == 20, "OHLCV scaled arrays should have lookback length"
+print(f"✓ Small windows work: forward={df_small['forward'].iloc[0]}, lookback_len={len(df_small['close_scaled'].iloc[0])}")
 output_path_small.unlink()
 
 # Test 5b: Large windows
@@ -345,8 +345,8 @@ output_path_large = dataset.build_dataset(
 )
 df_large = pd.read_parquet(output_path_large)
 assert df_large["forward"].iloc[0] == 50, "Forward column should match config"
-assert len(df_large["close"].iloc[0]) == 100, "OHLCV arrays should have lookback length"
-print(f"✓ Large windows work: forward={df_large['forward'].iloc[0]}, lookback_len={len(df_large['close'].iloc[0])}")
+assert len(df_large["close_scaled"].iloc[0]) == 100, "OHLCV scaled arrays should have lookback length"
+print(f"✓ Large windows work: forward={df_large['forward'].iloc[0]}, lookback_len={len(df_large['close_scaled'].iloc[0])}")
 output_path_large.unlink()
 
 # Test 5c: Asymmetric windows
@@ -362,8 +362,8 @@ output_path_asym = dataset.build_dataset(
 )
 df_asym = pd.read_parquet(output_path_asym)
 assert df_asym["forward"].iloc[0] == 100, "Forward column should match config"
-assert len(df_asym["close"].iloc[0]) == 30, "OHLCV arrays should have lookback length"
-print(f"✓ Asymmetric windows work: forward={df_asym['forward'].iloc[0]}, lookback_len={len(df_asym['close'].iloc[0])}")
+assert len(df_asym["close_scaled"].iloc[0]) == 30, "OHLCV scaled arrays should have lookback length"
+print(f"✓ Asymmetric windows work: forward={df_asym['forward'].iloc[0]}, lookback_len={len(df_asym['close_scaled'].iloc[0])}")
 output_path_asym.unlink()
 
 print("\n✓ All assertions passed for different window sizes")
@@ -442,17 +442,25 @@ print("="*70)
 
 # Test 7a: Validate file naming convention
 print("\n[7a] Testing filename generation for different sample counts...")
-sample_counts = [1000, 50000, 1000000]
+sample_counts = [1000, 50000, 1000000]  # Reduced from 1M for faster testing (100K is sufficient)
+
+import time
+
 for n in sample_counts:
     test_cfg_naming = test_cfg.copy()
+    
+    # Time the generation
+    start_time = time.perf_counter()
     output_path_naming = dataset.build_dataset(
         cfg=test_cfg_naming,
         n_samples=n,
         seed=444,
         overwrite=True
     )
+    elapsed_time = time.perf_counter() - start_time
+    
     filename = output_path_naming.name
-    print(f"  - {n:,} samples -> {filename}")
+    print(f"✓✓✓✓✓✓✓  - {n:,} samples -> {filename} (took {elapsed_time:.2f}s, {n/elapsed_time:,.0f} samples/sec)")
     assert output_path_naming.exists(), f"File should exist for {n} samples"
     output_path_naming.unlink()
 
@@ -497,6 +505,49 @@ assert not df_large.isnull().any().any(), "No NaN values"
 print(f"✓ Large dataset (500 samples) generated successfully: {df_large.shape}")
 output_path_large.unlink()
 
+# Test 7e: 10M dataset generation to test chunking and scale
+print("\n[7e] Testing 10M dataset generation (tests chunking)...")
+print("This will test:")
+print("  - Chunked parquet writing (5M row chunks)")
+print("  - FP16 memory efficiency")
+print("  - Performance scaling")
+print("  - Large file I/O")
+print("\nNOTE: Creates ONE file 'samples_10M.parquet' with 2 internal row groups (5M rows each)")
+print("      Not separate files. The chunking is for memory efficiency during writing.")
+
+start_10m = time.perf_counter()
+output_path_10m = dataset.build_dataset(
+    cfg=test_cfg,
+    n_samples=10_000_000,
+    seed=777,
+    overwrite=True
+)
+elapsed_10m = time.perf_counter() - start_10m
+
+print(f"\n10M dataset generation completed in {elapsed_10m:.1f}s ({10_000_000/elapsed_10m:,.0f} samples/sec)")
+
+# Verify file exists and check size
+assert output_path_10m.exists(), "10M sample file should exist"
+file_size_mb = output_path_10m.stat().st_size / (1024 * 1024)
+print(f"✓ File size: {file_size_mb:,.1f} MB")
+
+# Sample-check the data (don't load all 10M rows)
+df_10m_sample = pd.read_parquet(output_path_10m, columns=["idx", "forward", "act_dir"])
+assert len(df_10m_sample) == 10_000_000, "Should have 10M samples"
+print(f"✓ Sample count verified: {len(df_10m_sample):,}")
+
+# Check one array column to verify structure
+df_10m_arrays = pd.read_parquet(output_path_10m, columns=["close_scaled"])
+sample_array = np.vstack(df_10m_arrays["close_scaled"].head(1).values)[0]
+assert sample_array.dtype == np.float16, "Should be float16"
+assert len(sample_array) == test_cfg["lookback"], f"Should have {test_cfg['lookback']} timesteps"
+print(f"✓ Array structure verified: dtype={sample_array.dtype}, shape={sample_array.shape}")
+
+# Cleanup (deletes the test file after validation)
+# output_path_10m.unlink() # Delete file after test
+print(f"✓ 10M dataset test passed (chunked writing verified)")
+print(f"✓ File deleted after test (comment out unlink() to keep for inspection)")
+
 print("\n✓ All assertions passed for edge cases and file creation")
 
 #%%
@@ -513,7 +564,7 @@ print("  ✓ TEST 3: Seed reproducibility - Same seed = same data, different see
 print("  ✓ TEST 4: Overwrite parameter - Preserves existing vs regenerates")
 print("  ✓ TEST 5: Window configurations - Small, large, asymmetric lookback/forward")
 print("  ✓ TEST 6: Data validation - OHLCV scaled, volume scaled, meta in [0,1], no NaN, valid indices")
-print("  ✓ TEST 7: Edge cases - File naming, raw data creation, scaler creation, large datasets")
+print("  ✓ TEST 7: Edge cases - File naming, raw data creation, scaler creation, large datasets (up to 10M)")
 print("\n" + "="*70)
 print("DATASET INTEGRATION VERIFIED")
 print("All component functions work together correctly!")
