@@ -199,7 +199,7 @@ print("✓ inverse_transform_dict() works correctly")
 
 # Test 2d: Save/load
 print("\n[2d] Testing save/load...")
-save_path = project_root / "dev" / "sequential_testing_new" / "temp_scaler.json"
+save_path = project_root / "dev" / "sequential_testing" / "temp_scaler.json"
 scaler.save(save_path)
 
 scaler2 = scale.MetaScaler(kind="minmax")
@@ -511,3 +511,5 @@ print("    - Leverage constraints satisfied")
 print("    - Balance non-negative")
 print("    - SL/TP correctly zeroed for flat positions")
 print("\n✓ scale.py and synth.py modules validated")
+
+# %%

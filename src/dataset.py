@@ -169,22 +169,41 @@ def build_dataset(
     # ---------- reward ----------
     # Compute reward(s) for training labels
     # Single target mode: reward_key='car' → DataFrame with 'y' column
-    # Multi-target mode: reward_funcs=['car', 'sharpe'] → DataFrame with 'y_car', 'y_sharpe' columns
-    print(f"Computing rewards using '{cfg['reward_key']}' metric...")
+    # Multi-target mode: reward_key=['car', 'sharpe'] → DataFrame with 'y_car', 'y_sharpe' columns
     
-    rewards_df = reward.compute_many(
-        df_close=df_close["close"].values,
-        samples=samples,
-        forward_lookup=forward_lookup,
-        scaler=scaler,
-        reward_key=cfg["reward_key"],  # Single target mode (backward compatible)
-        fee_bp=cfg["fee_bps"],
-        slip_bp=cfg["slippage_bps"],
-        spread_bp=cfg["spread_bps"],
-        night_bp=cfg["overnight_bp"],
-        trading_days=cfg.get("trading_days_per_year", 252),
-        epsilon=cfg.get("epsilon", 1e-8)
-    )
+    reward_config = cfg["reward_key"]
+    if isinstance(reward_config, list):
+        print(f"Computing rewards using {len(reward_config)} metrics: {reward_config}...")
+        rewards_df = reward.compute_many(
+            df_close=df_close["close"].values,
+            samples=samples,
+            forward_lookup=forward_lookup,
+            scaler=scaler,
+            reward_funcs=reward_config,  # Multi-target mode
+            fee_bp=cfg["fee_bps"],
+            slip_bp=cfg["slippage_bps"],
+            spread_bp=cfg["spread_bps"],
+            night_bp=cfg["overnight_bp"],
+            trading_days=cfg.get("trading_days_per_year", 252),
+            risk_free_rate=cfg.get("risk_free_rate", 0.02),
+            epsilon=cfg.get("epsilon", 1e-8)
+        )
+    else:
+        print(f"Computing rewards using '{reward_config}' metric...")
+        rewards_df = reward.compute_many(
+            df_close=df_close["close"].values,
+            samples=samples,
+            forward_lookup=forward_lookup,
+            scaler=scaler,
+            reward_key=reward_config,  # Single target mode (backward compatible)
+            fee_bp=cfg["fee_bps"],
+            slip_bp=cfg["slippage_bps"],
+            spread_bp=cfg["spread_bps"],
+            night_bp=cfg["overnight_bp"],
+            trading_days=cfg.get("trading_days_per_year", 252),
+            risk_free_rate=cfg.get("risk_free_rate", 0.02),  # Add risk-free rate parameter
+            epsilon=cfg.get("epsilon", 1e-8)
+        )
     
     # Attach reward column(s) to samples DataFrame
     # Single target: rewards_df has 'y' column

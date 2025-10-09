@@ -766,3 +766,5 @@ print("    - Invalid coverage rejection")
 print("  ✓ TEST 8 - Integration:")
 print("    - Full workflow (generate -> save -> load -> lookup -> validate)")
 print("\n✓ forward_windows.py module validated with comprehensive edge case testing")
+
+# %%

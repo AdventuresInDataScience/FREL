@@ -36,6 +36,99 @@ import lightgbm as lgb
 from mapie.regression import MapieRegressor
 
 
+# ========== CUSTOM LOSS FUNCTIONS ==========
+class GeometricMeanLoss(nn.Module):
+    """
+    Geometric Mean loss for reward prediction.
+    
+    For positive rewards: log(pred/target)^2
+    For negative rewards: (pred - target)^2
+    
+    This emphasizes relative errors for positive values and absolute errors for negative values.
+    """
+    def __init__(self, epsilon: float = 1e-8):
+        super().__init__()
+        self.epsilon = epsilon
+    
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        # Handle positive and negative rewards differently
+        pos_mask = target > 0
+        neg_mask = target <= 0
+        
+        loss = torch.zeros_like(pred)
+        
+        # For positive rewards: geometric mean (log-space)
+        if pos_mask.any():
+            pred_pos = torch.clamp(pred[pos_mask], min=self.epsilon)
+            target_pos = torch.clamp(target[pos_mask], min=self.epsilon)
+            log_ratio = torch.log(pred_pos / target_pos)
+            loss[pos_mask] = log_ratio ** 2
+        
+        # For negative rewards: standard MSE
+        if neg_mask.any():
+            loss[neg_mask] = (pred[neg_mask] - target[neg_mask]) ** 2
+        
+        return loss.mean()
+
+
+class AdaptiveLoss(nn.Module):
+    """
+    Adaptive loss that combines MSE and Huber loss based on prediction magnitude.
+    
+    Uses MSE for small errors and Huber loss for large errors to reduce outlier impact.
+    """
+    def __init__(self, delta: float = 1.0, threshold: float = 0.1):
+        super().__init__()
+        self.delta = delta
+        self.threshold = threshold
+        self.huber = nn.HuberLoss(delta=delta)
+        self.mse = nn.MSELoss()
+    
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        error = torch.abs(pred - target)
+        small_error_mask = error < self.threshold
+        
+        loss = torch.zeros_like(error)
+        
+        if small_error_mask.any():
+            loss[small_error_mask] = self.mse(pred[small_error_mask], target[small_error_mask])
+        
+        large_error_mask = ~small_error_mask
+        if large_error_mask.any():
+            loss[large_error_mask] = self.huber(pred[large_error_mask], target[large_error_mask])
+        
+        return loss.mean()
+
+
+def get_loss_function(loss_type: str = 'mse', **kwargs) -> nn.Module:
+    """
+    Factory function for loss functions.
+    
+    Args:
+        loss_type: 'mse', 'huber', 'geometric_mean', 'adaptive'
+        **kwargs: Additional parameters for specific losses
+    
+    Returns:
+        PyTorch loss function
+    """
+    if loss_type == 'mse':
+        return nn.MSELoss()
+    elif loss_type == 'mae':
+        return nn.L1Loss()
+    elif loss_type == 'huber':
+        delta = kwargs.get('delta', 1.0)
+        return nn.HuberLoss(delta=delta)
+    elif loss_type == 'geometric_mean':
+        epsilon = kwargs.get('epsilon', 1e-8)
+        return GeometricMeanLoss(epsilon=epsilon)
+    elif loss_type == 'adaptive':
+        delta = kwargs.get('delta', 1.0)
+        threshold = kwargs.get('threshold', 0.1)
+        return AdaptiveLoss(delta=delta, threshold=threshold)
+    else:
+        raise ValueError(f"Unknown loss type: {loss_type}")
+
+
 class SklearnPyTorchWrapper(BaseEstimator, RegressorMixin):
     """
     Sklearn-compatible wrapper for PyTorch models.
@@ -64,7 +157,19 @@ class SklearnPyTorchWrapper(BaseEstimator, RegressorMixin):
         verbose: int = 0,
         lookback: int = 200,
         price_features: int = 5,
-        meta_len: int = 8
+        meta_len: int = 20,
+        # New training parameters
+        loss_type: str = 'mse',
+        optimizer_type: str = 'adam',
+        weight_decay: float = 0.0,
+        scheduler_type: Optional[str] = None,
+        early_stopping: bool = True,
+        patience: int = 10,
+        validation_split: float = 0.2,
+        # Loss function specific parameters
+        loss_epsilon: float = 1e-8,  # For geometric_mean loss
+        loss_delta: float = 1.0,     # For huber/adaptive loss
+        loss_threshold: float = 0.1  # For adaptive loss
     ):
         self.model = model
         self.model_type = model_type
@@ -79,16 +184,74 @@ class SklearnPyTorchWrapper(BaseEstimator, RegressorMixin):
         self.price_features = price_features
         self.meta_len = meta_len
         
+        # Training configuration
+        self.loss_type = loss_type
+        self.optimizer_type = optimizer_type
+        self.weight_decay = weight_decay
+        self.scheduler_type = scheduler_type
+        self.early_stopping = early_stopping
+        self.patience = patience
+        self.validation_split = validation_split
+        
+        # Loss function parameters
+        self.loss_kwargs = {
+            'epsilon': loss_epsilon,
+            'delta': loss_delta,
+            'threshold': loss_threshold
+        }
+        
         # Move model to device
         self.model = self.model.to(self.device)
         
-        # Optimizer and loss
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        self.criterion = nn.MSELoss()
+        # Setup optimizer and loss
+        self._setup_training()
+    
+    def _setup_training(self):
+        """Setup optimizer, loss function, and scheduler."""
+        # Setup loss function
+        self.criterion = get_loss_function(self.loss_type, **self.loss_kwargs)
+        
+        # Setup optimizer
+        if self.optimizer_type == 'adam':
+            self.optimizer = torch.optim.Adam(
+                self.model.parameters(), 
+                lr=self.lr, 
+                weight_decay=self.weight_decay
+            )
+        elif self.optimizer_type == 'adamw':
+            self.optimizer = torch.optim.AdamW(
+                self.model.parameters(), 
+                lr=self.lr, 
+                weight_decay=self.weight_decay
+            )
+        elif self.optimizer_type == 'sgd':
+            self.optimizer = torch.optim.SGD(
+                self.model.parameters(), 
+                lr=self.lr, 
+                weight_decay=self.weight_decay,
+                momentum=0.9
+            )
+        else:
+            raise ValueError(f"Unknown optimizer: {self.optimizer_type}")
+        
+        # Setup scheduler
+        self.scheduler = None
+        if self.scheduler_type == 'cosine':
+            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer, T_max=self.epochs
+            )
+        elif self.scheduler_type == 'step':
+            self.scheduler = torch.optim.lr_scheduler.StepLR(
+                self.optimizer, step_size=max(1, self.epochs // 3), gamma=0.5
+            )
+        elif self.scheduler_type == 'plateau':
+            self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                self.optimizer, patience=max(1, self.patience // 2), factor=0.5
+            )
     
     def fit(self, X: np.ndarray, y: np.ndarray, **kwargs) -> 'SklearnPyTorchWrapper':
         """
-        Fit the PyTorch model.
+        Fit the PyTorch model with enhanced training features.
         
         Args:
             X: Combined features (N, lookback*price_features + meta_len)
@@ -105,33 +268,110 @@ class SklearnPyTorchWrapper(BaseEstimator, RegressorMixin):
         X_meta_t = torch.FloatTensor(X_meta).to(self.device)
         y_t = torch.FloatTensor(y).reshape(-1, 1).to(self.device)
         
-        # Train model
+        # Split into train/validation if early stopping is enabled
+        if self.early_stopping and self.validation_split > 0:
+            n_samples = len(X_price)
+            val_size = int(n_samples * self.validation_split)
+            train_size = n_samples - val_size
+            
+            # Random split
+            indices = np.random.permutation(n_samples)
+            train_idx = indices[:train_size]
+            val_idx = indices[train_size:]
+            
+            X_price_train = X_price_t[train_idx]
+            X_meta_train = X_meta_t[train_idx]
+            y_train = y_t[train_idx]
+            
+            X_price_val = X_price_t[val_idx]
+            X_meta_val = X_meta_t[val_idx]
+            y_val = y_t[val_idx]
+        else:
+            X_price_train = X_price_t
+            X_meta_train = X_meta_t
+            y_train = y_t
+            X_price_val = X_meta_val = y_val = None
+        
+        # Training loop with validation and early stopping
+        best_val_loss = float('inf')
+        patience_counter = 0
+        training_history = {'train_loss': [], 'val_loss': [], 'lr': []}
+        
         self.model.train()
         for epoch in range(self.epochs):
-            # Mini-batch training
-            n_samples = len(X_price)
-            indices = np.random.permutation(n_samples)
+            # Training phase
+            epoch_train_loss = 0.0
+            n_train_batches = 0
             
-            epoch_loss = 0
-            n_batches = 0
+            # Shuffle training data
+            n_train = len(X_price_train)
+            train_indices = np.random.permutation(n_train)
             
-            for i in range(0, n_samples, self.batch_size):
-                batch_idx = indices[i:i+self.batch_size]
+            for i in range(0, n_train, self.batch_size):
+                batch_idx = train_indices[i:i+self.batch_size]
                 
                 # Forward pass
                 self.optimizer.zero_grad()
-                y_pred = self.model(X_price_t[batch_idx], X_meta_t[batch_idx])
-                loss = self.criterion(y_pred, y_t[batch_idx])
+                y_pred = self.model(X_price_train[batch_idx], X_meta_train[batch_idx])
+                loss = self.criterion(y_pred, y_train[batch_idx])
                 
-                # Backward pass
+                # Backward pass with gradient clipping
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
                 
-                epoch_loss += loss.item()
-                n_batches += 1
+                epoch_train_loss += loss.item()
+                n_train_batches += 1
             
-            if self.verbose > 0 and (epoch + 1) % 10 == 0:
-                print(f"Epoch {epoch+1}/{self.epochs}, Loss: {epoch_loss/n_batches:.6f}")
+            avg_train_loss = epoch_train_loss / n_train_batches
+            training_history['train_loss'].append(avg_train_loss)
+            
+            # Validation phase
+            val_loss = None
+            if X_price_val is not None:
+                self.model.eval()
+                with torch.no_grad():
+                    val_pred = self.model(X_price_val, X_meta_val)
+                    val_loss = self.criterion(val_pred, y_val).item()
+                    training_history['val_loss'].append(val_loss)
+                
+                self.model.train()
+                
+                # Early stopping check
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+                    
+                    if patience_counter >= self.patience:
+                        if self.verbose > 0:
+                            print(f"Early stopping at epoch {epoch+1}")
+                        break
+            
+            # Learning rate scheduling
+            if self.scheduler is not None:
+                if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                    if val_loss is not None:
+                        self.scheduler.step(val_loss)
+                else:
+                    self.scheduler.step()
+            
+            # Record learning rate
+            current_lr = self.optimizer.param_groups[0]['lr']
+            training_history['lr'].append(current_lr)
+            
+            # Verbose output
+            if self.verbose > 0 and (epoch + 1) % max(1, self.epochs // 10) == 0:
+                if val_loss is not None:
+                    print(f"Epoch {epoch+1}/{self.epochs} - Train Loss: {avg_train_loss:.6f}, "
+                          f"Val Loss: {val_loss:.6f}, LR: {current_lr:.8f}")
+                else:
+                    print(f"Epoch {epoch+1}/{self.epochs} - Train Loss: {avg_train_loss:.6f}, "
+                          f"LR: {current_lr:.8f}")
+        
+        # Store training history
+        self.training_history = training_history
         
         return self
     

@@ -78,6 +78,8 @@ class MetaScaler:
         return unscaled
 
     def save(self, path: Path):
+        # Ensure parent directory exists
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self.stats))
 
     def load(self, path: Path):

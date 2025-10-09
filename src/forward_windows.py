@@ -83,6 +83,9 @@ def generate_forward_windows(
                 forward_low[i, available:] = fwd_low[-1]
                 forward_close[i, :available] = fwd_close
                 forward_close[i, available:] = fwd_close[-1]
+                # Handle volume overflow for FP16 conversion
+                if use_fp16:
+                    fwd_volume = np.clip(fwd_volume, 0, 65504)
                 forward_volume[i, :available] = fwd_volume
                 forward_volume[i, available:] = fwd_volume[-1]
         else:
@@ -91,7 +94,12 @@ def generate_forward_windows(
             forward_high[i] = high_arr[idx:idx+forward]
             forward_low[i] = low_arr[idx:idx+forward]
             forward_close[i] = close_arr[idx:idx+forward]
-            forward_volume[i] = volume_arr[idx:idx+forward]
+            # Handle volume overflow for FP16 conversion
+            volume_slice = volume_arr[idx:idx+forward]
+            if use_fp16:
+                # Clip extremely large volumes before FP16 conversion to prevent overflow
+                volume_slice = np.clip(volume_slice, 0, 65504)  # FP16 max value
+            forward_volume[i] = volume_slice
         
         # Scale to close[idx-1] (reference point - last value of past window)
         if idx > 0:

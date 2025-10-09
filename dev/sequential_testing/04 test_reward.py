@@ -1061,3 +1061,5 @@ print("    - Missing forward_lookup raises ValueError")
 print("    - Missing scaler raises ValueError")
 print("\n✓ reward.py module fully validated with new architecture")
 print("✓ Single-target and multi-target modes comprehensively tested")
+
+# %%

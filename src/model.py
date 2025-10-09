@@ -19,9 +19,17 @@ import lightgbm as lgb
 from typing import Tuple, Dict, Any
 
 
+
 # ========== Base Module for Two-Input Models ==========
 class TwoInputModel(nn.Module):
-    """Base class for models that take (price, meta) inputs"""
+    """
+    Base class for models that take (price, meta) inputs.
+    
+    Updated for dual-position trading structure:
+    - Meta features (20): equity, balance, long/short positions+actions, scaled OHLCV, forward flag
+    - Price sequences (5): OHLCV time series
+    - Target: Single reward metric (CAR, Sharpe, Sortino, or Calmar)
+    """
     
     def forward(self, price, meta):
         """
@@ -38,13 +46,14 @@ class TwoInputModel(nn.Module):
 class TransformerModel(TwoInputModel):
     """
     Transformer with CNN front-end and meta skip-connection.
+    Updated for dual-position structure.
     Inputs:
-      price: (B, 200, 5)
-      meta: (B, meta_len)
+      price: (B, 200, 5) - OHLCV sequences  
+      meta: (B, 20) - dual-position features: equity, balance, positions, actions, scaled OHLCV, forward flag
     Output:
-      pred: (B, 1)
+      pred: (B, 1) - single reward prediction
     """
-    def __init__(self, price_shape: Tuple[int, int] = (200, 5), meta_len: int = 8,
+    def __init__(self, price_shape: Tuple[int, int] = (200, 5), meta_len: int = 20,
                  d_model: int = 128, nhead: int = 4, tx_blocks: int = 4,
                  mlp_ratio: int = 4, dropout: float = 0.1):
         super().__init__()
@@ -57,9 +66,11 @@ class TransformerModel(TwoInputModel):
         self.cnn2 = nn.Conv1d(64, d_model, kernel_size=4, stride=2, padding=1)
         
         # Calculate actual output length after convolutions
-        # After cnn1: (200 + 2*3 - 8) // 2 + 1 = 100
-        # After cnn2: (100 + 2*1 - 4) // 2 + 1 = 50
-        self.seq_len_out = 50
+        # After cnn1: (L + 2*3 - 8) // 2 + 1
+        # After cnn2: (prev + 2*1 - 4) // 2 + 1
+        after_cnn1 = (self.seq_len + 2*3 - 8) // 2 + 1
+        after_cnn2 = (after_cnn1 + 2*1 - 4) // 2 + 1
+        self.seq_len_out = after_cnn2
         
         # Positional encoding (learnable)
         self.pos_encoding = nn.Parameter(torch.randn(1, self.seq_len_out, 1) * 0.02)
@@ -112,7 +123,7 @@ class TransformerModel(TwoInputModel):
 # ========== Informer Model ==========
 class InformerModel(TwoInputModel):
     """Informer with ProbSparse self-attention (simplified version)"""
-    def __init__(self, price_shape=(200,5), meta_len=8,
+    def __init__(self, price_shape=(200,5), meta_len=20,
                  d_model=128, nhead=4, blocks=4, dropout=0.1):
         super().__init__()
         T, C = price_shape
@@ -148,7 +159,7 @@ class InformerModel(TwoInputModel):
 # ========== FedFormer Model ==========
 class FedFormerModel(TwoInputModel):
     """FedFormer with frequency-enhanced decomposition"""
-    def __init__(self, price_shape=(200,5), meta_len=8,
+    def __init__(self, price_shape=(200,5), meta_len=20,
                  d_model=128, nhead=4, blocks=4, dropout=0.1):
         super().__init__()
         T, C = price_shape
@@ -197,7 +208,7 @@ class FedFormerModel(TwoInputModel):
 # ========== PatchTST Model ==========
 class PatchTSTModel(TwoInputModel):
     """PatchTST with patch-based attention"""
-    def __init__(self, price_shape=(200,5), meta_len=8,
+    def __init__(self, price_shape=(200,5), meta_len=20,
                  patch_len=16, stride=8,
                  d_model=128, nhead=4, blocks=4, dropout=0.1):
         super().__init__()
@@ -206,11 +217,11 @@ class PatchTSTModel(TwoInputModel):
         self.stride = stride
         
         # Calculate number of patches
-        n_patches = (T - patch_len) // stride + 1
+        self.n_patches = (T - patch_len) // stride + 1
         
         # Patch embedding
         self.patch_embed = nn.Linear(patch_len * C, d_model)
-        self.pos_embed = nn.Parameter(torch.randn(1, n_patches, 1) * 0.02)
+        self.pos_embed = nn.Parameter(torch.randn(1, self.n_patches, 1) * 0.02)
         
         # Transformer
         encoder_layer = nn.TransformerEncoderLayer(
@@ -261,7 +272,7 @@ class PatchTSTModel(TwoInputModel):
 # ========== iTransformer Model ==========
 class iTransformerModel(TwoInputModel):
     """iTransformer with inverted dimensionality"""
-    def __init__(self, price_shape=(200,5), meta_len=8,
+    def __init__(self, price_shape=(200,5), meta_len=20,
                  d_model=128, nhead=4, blocks=4, dropout=0.1):
         super().__init__()
         T, C = price_shape
@@ -297,7 +308,7 @@ class iTransformerModel(TwoInputModel):
 # ========== N-BEATS Model ==========
 class NBeatsModel(TwoInputModel):
     """N-BEATS with basis expansion (simplified)"""
-    def __init__(self, price_shape=(200,5), meta_len=8,
+    def __init__(self, price_shape=(200,5), meta_len=20,
                  stack_types=['trend','seasonality','generic'],
                  n_blocks=[1,1,1], mlp_units=512,
                  shares_weights=False, dropout=0.0):
@@ -327,7 +338,7 @@ class NBeatsModel(TwoInputModel):
 # ========== N-HiTS Model ==========
 class NHiTSModel(TwoInputModel):
     """N-HiTS with hierarchical interpolation (simplified)"""
-    def __init__(self, price_shape=(200,5), meta_len=8,
+    def __init__(self, price_shape=(200,5), meta_len=20,
                  pools=[1,2,4], mlp_units=512, dropout=0.0):
         super().__init__()
         T, C = price_shape
@@ -418,7 +429,7 @@ def build_model(cfg: Dict[str, Any], device='cuda'):
     """
     model_type = cfg['model_type'].lower()
     price_shape = (cfg.get('lookback', 200), 5)
-    meta_len = 8  # Standard meta features length
+    meta_len = 20  # Updated: dual-position structure with more features
     
     # Common parameters for neural models
     d_model = cfg.get('d_model', 128)
