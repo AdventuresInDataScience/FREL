@@ -163,6 +163,7 @@ def build_samples(df: pd.DataFrame, n: int, lookback: int, forward: int, rng: np
     - act_long_value, act_short_value: target position sizes
     - act_long_sl, act_long_tp, act_short_sl, act_short_tp: target SL/TP
     - open, high, low, close, volume: past OHLCV windows (arrays)
+    - phase: curriculum phase (0,1,2) if available in df
     
     Includes:
     - Hold states: 10% with no positions (flat)
@@ -313,6 +314,11 @@ def build_samples(df: pd.DataFrame, n: int, lookback: int, forward: int, rng: np
     close_windows = close_arr[all_indices].astype(np.float32)
     volume_windows = volume_arr[all_indices].astype(np.float32)
     
+    # Extract phase information if available
+    phase_values = None
+    if 'phase' in df.columns:
+        phase_values = df['phase'].iloc[indices].values
+    
     # Build DataFrame efficiently
     # Create dict with scalar columns first (fast)
     data = {
@@ -334,6 +340,10 @@ def build_samples(df: pd.DataFrame, n: int, lookback: int, forward: int, rng: np
         "act_short_sl": act_short_sl,
         "act_short_tp": act_short_tp,
     }
+    
+    # Add phase column if available
+    if phase_values is not None:
+        data["phase"] = phase_values
     
     # Add array columns using pd.Series (more efficient for object dtype)
     df_result = pd.DataFrame(data)

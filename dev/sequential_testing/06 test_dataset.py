@@ -1,7 +1,8 @@
 #%%
 # =============================================================================
-# TEST 05: dataset.py Functions
-# Test high-level dataset building, scaling, forward windows, and reward computation
+# TEST 06: dataset.py Functions
+# Test high-level dataset building, scaling, forward windows, reward computation,
+# and curriculum phase assignment
 # Dependencies: synth.py, reward.py, scale.py, curriculum.py, forward_windows.py
 # =============================================================================
 
@@ -179,7 +180,7 @@ print(f"Columns: {samples_df.columns.tolist()}")
 
 # Validate basic structure
 expected_cols = [
-    'idx', 'forward',
+    'idx', 'forward', 'phase',  # Added phase column from curriculum
     'equity', 'balance', 
     'long_value', 'short_value', 'long_sl', 'long_tp', 'short_sl', 'short_tp',
     'act_long_value', 'act_short_value', 'act_long_sl', 'act_long_tp', 'act_short_sl', 'act_short_tp',
@@ -224,6 +225,71 @@ for col in ohlcv_cols:
 print(f"\nReward statistics:")
 print(f"  y (reward): mean={samples_df['y'].mean():.4f}, std={samples_df['y'].std():.4f}")
 print(f"  y range: [{samples_df['y'].min():.4f}, {samples_df['y'].max():.4f}]")
+
+# Comprehensive phase column validation
+print(f"\n[1d] Validating curriculum phase column...")
+if 'phase' in samples_df.columns:
+    print(f"✓ Phase column present in dataset")
+    
+    # Check phase value distribution
+    phase_counts = samples_df['phase'].value_counts().sort_index()
+    print(f"  Phase distribution: {phase_counts.to_dict()}")
+    
+    # Validate phase values are in expected range [0, 1, 2]
+    unique_phases = sorted(samples_df['phase'].unique())
+    expected_phases = [0, 1, 2]
+    print(f"  Unique phases: {unique_phases}")
+    
+    if set(unique_phases).issubset(set(expected_phases)):
+        print(f"  ✓ All phases are valid (0, 1, 2)")
+    else:
+        invalid_phases = set(unique_phases) - set(expected_phases)
+        print(f"  ✗ Invalid phases found: {invalid_phases}")
+    
+    # Check for any null values
+    null_count = samples_df['phase'].isnull().sum()
+    if null_count == 0:
+        print(f"  ✓ No null values in phase column")
+    else:
+        print(f"  ✗ Found {null_count} null values in phase column")
+    
+    # Validate phase data type
+    phase_dtype = samples_df['phase'].dtype
+    print(f"  Phase data type: {phase_dtype}")
+    if phase_dtype in ['int8', 'int16', 'int32', 'int64']:
+        print(f"  ✓ Phase data type is integer")
+    else:
+        print(f"  ⚠ Warning: Phase data type is not integer")
+    
+    # Check curriculum logic consistency
+    if len(samples_df) >= 10:  # Only if we have enough samples
+        print(f"  Curriculum logic check:")
+        
+        # Get a few samples from each phase for validation
+        phase_sample_stats = []
+        for phase in unique_phases:
+            phase_samples = samples_df[samples_df['phase'] == phase]
+            if len(phase_samples) > 0:
+                sample_idx = phase_samples['idx'].iloc[0]
+                phase_sample_stats.append({
+                    'phase': phase,
+                    'count': len(phase_samples),
+                    'sample_idx': sample_idx
+                })
+        
+        for stat in phase_sample_stats:
+            print(f"    Phase {stat['phase']}: {stat['count']} samples (sample idx: {stat['sample_idx']})")
+        
+        # Validate that curriculum assignment is working
+        if len(unique_phases) >= 2:
+            print(f"  ✓ Multiple curriculum phases assigned ({len(unique_phases)} phases)")
+        else:
+            print(f"  ⚠ Warning: Only {len(unique_phases)} curriculum phase(s) assigned")
+    
+else:
+    print(f"✗ Phase column missing from dataset!")
+    print(f"  This indicates curriculum assignment is not working properly")
+    print(f"  Expected 'phase' column with values [0, 1, 2] based on volatility/skewness")
 
 print(f"✓ Dataset validation completed")
 
@@ -445,11 +511,24 @@ if len(close_array) > 0:
     else:
         print(f"⚠ OHLCV scaling may be incorrect")
 
-# Check curriculum phase assignment
-if 'phase' in test_ohlcv.columns:
-    phase_counts = test_ohlcv['phase'].value_counts()
-    print(f"Curriculum phases: {phase_counts.to_dict()}")
-    print(f"✓ Curriculum assignment working")
+# Check curriculum phase assignment in reproduced dataset
+print(f"\nCurriculum phase validation:")
+if 'phase' in samples_repro.columns:
+    phase_counts = samples_repro['phase'].value_counts().sort_index()
+    print(f"  Phase distribution: {phase_counts.to_dict()}")
+    
+    # Verify phase consistency between original and reproduced
+    if 'phase' in samples_orig_subset.columns:
+        phases_match = (samples_orig_subset['phase'].values == samples_repro_subset['phase'].values).all()
+        print(f"  Phase reproducibility: {'✓ Identical' if phases_match else '✗ Different'}")
+        
+        if not phases_match:
+            diff_count = (samples_orig_subset['phase'] != samples_repro_subset['phase']).sum()
+            print(f"    Different phase assignments: {diff_count}/{len(samples_orig_subset)}")
+    
+    print(f"  ✓ Curriculum assignment working in reproduced dataset")
+else:
+    print(f"  ✗ Phase column missing from reproduced dataset!")
 
 print(f"✓ Data relationships validated")
 
@@ -1022,6 +1101,7 @@ Summary:
     - Successfully generated complete dataset with {n_samples} samples
     - Proper OHLCV scaling, meta scaling, forward windows, and rewards
     - All expected columns present with correct data types and ranges
+    - Phase column validation: presence, valid values (0,1,2), distribution analysis
   ✓ TEST 2: Generated files validation
     - Scaler JSON file saved and loadable
     - Forward windows parquet file saved and loadable  
@@ -1035,7 +1115,8 @@ Summary:
   ✓ TEST 5: Data consistency and reproducibility
     - Same seed produces identical datasets
     - OHLCV scaling relationships correct
-    - Curriculum phase assignment working
+    - Curriculum phase assignment working and reproducible
+    - Phase column consistency between dataset generations
   ✓ TEST 6: Edge cases and error handling
     - Very small n_samples handled correctly
     - Invalid lookback/forward configurations properly rejected
