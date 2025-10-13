@@ -1,6 +1,6 @@
 #%%
 # =============================================================================
-# TEST 06: model.py Functions
+# TEST 07: model.py Functions
 # Test all model architectures, factory functions, and edge cases
 # Dependencies: torch, lightgbm, dataset.py (for data structure)
 # =============================================================================
