@@ -207,6 +207,10 @@ class Predictor:
         
         df = df.copy()
         
+        # Initialize scaled columns
+        for col in self.OHLCV_COLS:
+            df[f"{col}_scaled"] = None
+        
         # Scale OHLCV arrays
         for i in range(len(df)):
             ohlcv_dict = {col: df[col].iloc[i] for col in self.OHLCV_COLS}
@@ -488,6 +492,82 @@ class Predictor:
                 'act_short_tp': 0.0,
                 'pred_reward': pred
             }
+    
+    def find_optimal_action_long(
+        self,
+        ohlcv_arrays: Dict[str, np.ndarray],
+        state: Dict[str, float],
+        long_value_range: Optional[tuple[float, float]] = None,
+        sl_range: Optional[tuple[float, float]] = None,
+        tp_range: Optional[tuple[float, float]] = None,
+        maxiter: int = 100,
+        seed: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Find optimal LONG-ONLY action that maximizes predicted reward.
+        
+        Convenience wrapper that forces short position to zero and only
+        optimizes long position parameters.
+        
+        Args:
+            ohlcv_arrays: Dict with OHLCV arrays
+            state: Dict with 8 state features
+            long_value_range, sl_range, tp_range: Long position action bounds
+            maxiter: Max optimization iterations
+            seed: Random seed
+        
+        Returns:
+            Dict with optimal long action parameters (short set to 0) + pred_reward
+        """
+        # Force short position to zero by setting range to (0, 0)
+        return self.find_optimal_action(
+            ohlcv_arrays=ohlcv_arrays,
+            state=state,
+            long_value_range=long_value_range,
+            short_value_range=(0.0, 0.0),  # Force short to zero
+            sl_range=sl_range,
+            tp_range=tp_range,
+            maxiter=maxiter,
+            seed=seed
+        )
+    
+    def find_optimal_action_short(
+        self,
+        ohlcv_arrays: Dict[str, np.ndarray],
+        state: Dict[str, float],
+        short_value_range: Optional[tuple[float, float]] = None,
+        sl_range: Optional[tuple[float, float]] = None,
+        tp_range: Optional[tuple[float, float]] = None,
+        maxiter: int = 100,
+        seed: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Find optimal SHORT-ONLY action that maximizes predicted reward.
+        
+        Convenience wrapper that forces long position to zero and only
+        optimizes short position parameters.
+        
+        Args:
+            ohlcv_arrays: Dict with OHLCV arrays
+            state: Dict with 8 state features
+            short_value_range, sl_range, tp_range: Short position action bounds
+            maxiter: Max optimization iterations
+            seed: Random seed
+        
+        Returns:
+            Dict with optimal short action parameters (long set to 0) + pred_reward
+        """
+        # Force long position to zero by setting range to (0, 0)
+        return self.find_optimal_action(
+            ohlcv_arrays=ohlcv_arrays,
+            state=state,
+            long_value_range=(0.0, 0.0),  # Force long to zero
+            short_value_range=short_value_range,
+            sl_range=sl_range,
+            tp_range=tp_range,
+            maxiter=maxiter,
+            seed=seed
+        )
     
     def __repr__(self) -> str:
         return (

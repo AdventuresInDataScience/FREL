@@ -19,6 +19,18 @@ def scale_ohlcv_window(ohlcv: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
     out = {}
     for name in ["open", "high", "low", "close"]:
         out[name] = ohlcv[name] / close_last
+    
+    # Handle zero volume edge case
+    if vol_last == 0 or np.log1p(vol_last) == 0:
+        # If last volume is zero, use mean of non-zero volumes or fallback to 1
+        non_zero_vols = ohlcv["volume"][ohlcv["volume"] > 0]
+        if len(non_zero_vols) > 0:
+            vol_last = non_zero_vols.mean()
+        else:
+            # All volumes are zero - just return normalized zeros
+            out["volume"] = np.zeros_like(ohlcv["volume"])
+            return out
+    
     out["volume"] = np.log1p(ohlcv["volume"]) / np.log1p(vol_last)
     return out
 
