@@ -124,6 +124,11 @@ cfg.update({
 
     # Performance
     "n_jobs": -1,                   # Use all available CPU cores
+
+    # Model Training Params
+    'epochs': 20,
+    'batch_size': 64,
+    'loss_type': 'huber'
 })
 
 #%% 
@@ -144,7 +149,10 @@ samples_path = dataset.build_dataset(
     )
 #b) Load the generated samples
 df = pd.read_parquet(samples_path)
-# eg #df2 = pd.read_parquet('Data/FREL/test_samples_658166.parquet')
+# eg #df = pd.read_parquet('Data/FREL/test_samples_658166.parquet')
+
+X_price, X_meta, y = dataset.prepare_for_training(df, lookback= cfg['lookback'])
+
 data_end = time.time()
 print(f"Data preparation time: {data_end - data_start:.2f} seconds")
 # Df columns are:
@@ -162,16 +170,24 @@ print(f"Data preparation time: {data_end - data_start:.2f} seconds")
 training_start = time.time()
 
 
-frel = model.build_model(cfg, device='cuda')
-mapie_model = mapie.MapiePredictor(
-                model=frel,
-                method="plus",
-                cv=3,
-                n_jobs=-1,
-                random_state=42
-            )
+# Build raw PyTorch model
+frel_raw = model.build_model(cfg, device='cuda')
 
-mapie_model.fit(df)
+# Wrap it for sklearn compatibility
+frel = mapie.SklearnPyTorchWrapper(
+    model=frel_raw,
+    #model_type=cfg['model_type'],
+    device=device,
+    **cfg
+)
+
+mapie_model = mapie.MapiePredictor(
+    model=frel,
+    method="plus",
+    cv=3,
+    n_jobs=-1,
+    random_state=42
+)
 
 training_end = time.time()
 print(f"Model training time: {training_end - training_start:.2f} seconds")

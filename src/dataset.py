@@ -281,3 +281,38 @@ def build_dataset(
     print(f"  Parquet save: {t6-t5:.2f}s")
     print(f"  TOTAL: {t6-t0:.2f}s")
     return out_path
+
+
+def prepare_for_training(df, lookback=60):
+    """
+    Converts the DataFrame made in build_dataset()into X_price, X_meta, y arrays for model training.
+    
+    Args:
+        df: DataFrame with all features
+        lookback: Number of bars in each price feature list
+    
+    Returns:
+        X_price: np.ndarray of shape (N, lookback, 5)
+        X_meta: np.ndarray of shape (N, meta_len)
+        y: np.ndarray of shape (N,)
+
+    Example:
+        X_price, X_meta, y = prepare_for_training(df, lookback=60)
+    """
+    price_cols = ['open_scaled', 'high_scaled', 'low_scaled', 'close_scaled', 'volume_scaled']
+    meta_cols = [
+        'equity', 'balance', 'long_value', 'short_value', 'long_sl', 'long_tp',
+        'short_sl', 'short_tp', 'act_long_value', 'act_short_value',
+        'act_long_sl', 'act_long_tp', 'act_short_sl', 'act_short_tp', 'phase'
+    ]
+    
+    # Stack price features: each is a list of length lookback
+    X_price = np.stack([df[col].apply(lambda x: np.array(x)) for col in price_cols], axis=-1)  # (N, lookback, 5)
+    
+    # Meta features
+    X_meta = df[meta_cols].values  # (N, meta_len)
+    
+    # Target
+    y = df['y'].values  # (N,)
+    
+    return X_price, X_meta, y
