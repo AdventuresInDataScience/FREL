@@ -20,7 +20,7 @@ script_start = time.time()
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src import data, dataset, model, predictor, scale
+from src import data, dataset, model, predictor, scale, mapie
 
 # Setup device
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -144,9 +144,16 @@ samples_path = dataset.build_dataset(
     )
 #b) Load the generated samples
 df = pd.read_parquet(samples_path)
+# eg #df2 = pd.read_parquet('Data/FREL/test_samples_658166.parquet')
 data_end = time.time()
 print(f"Data preparation time: {data_end - data_start:.2f} seconds")
-
+# Df columns are:
+# Index(['idx', 'equity', 'balance', 'long_value', 'short_value', 'long_sl',
+#        'long_tp', 'short_sl', 'short_tp', 'act_long_value', 'act_short_value',
+#        'act_long_sl', 'act_long_tp', 'act_short_sl', 'act_short_tp', 'phase',
+#        'open_scaled', 'high_scaled', 'low_scaled', 'close_scaled',
+#        'volume_scaled', 'forward', 'y'],
+#       dtype='object')
 #%% 
 # =============================================================================
 # BLOCK 3: MODEL TRAINING
@@ -156,7 +163,15 @@ training_start = time.time()
 
 
 frel = model.build_model(cfg, device='cuda')
+mapie_model = mapie.MapiePredictor(
+                model=frel,
+                method="plus",
+                cv=3,
+                n_jobs=-1,
+                random_state=42
+            )
 
+mapie_model.fit(df)
 
 training_end = time.time()
 print(f"Model training time: {training_end - training_start:.2f} seconds")
